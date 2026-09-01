@@ -1,0 +1,18 @@
+# Ignore raw Olist datasets
+data/raw/olist/
+
+# Ignore all generated/cleaned datasets
+data/processed/*
+!data/processed/.gitkeep
+
+# Data (Do not upload large raw CSVs)
+data/raw/
+data/processed/*.csv
+!data/processed/.gitkeep
+
+# Python / Environment
+__pycache__/
+*.pyc
+.env
+venv/
+.ipynb_checkpoints/

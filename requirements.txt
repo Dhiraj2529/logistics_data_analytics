@@ -1,0 +1,18 @@
+All python libraries required for the logistics data analytics project are listed below:
+  
+pandas
+numpy
+matplotlib
+seaborn
+plotly
+scikit-learn
+statsmodels
+prophet
+ortools
+geopy
+geopandas
+folium
+streamlit
+fastapi
+uvicorn
+joblib

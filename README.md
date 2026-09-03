@@ -103,6 +103,31 @@ Route Optimization – OR-Tools CVRP reduces simulated total distance by ~15% co
 
 Inventory Optimization – Safety stock and reorder points calculated for top product categories.
 
+## 📂 Dynamic Data Ingestion & Custom CSV Testing
+
+This platform supports both the default pre-loaded Olist dataset and **dynamic custom dataset ingestion**, allowing evaluators to test the machine learning models and inventory optimization pipeline with their own data live.
+
+### How to Test with a Custom CSV:
+1. Navigate to the sidebar in the Streamlit application.
+2. Select **"Upload Custom CSV"** under the Data Source Configuration.
+3. Upload a CSV file matching the required schema.
+
+### Required Custom CSV Schema:
+Your input CSV should include the following core columns to ensure all metrics, lead times, and forecasts render correctly:
+* `order_purchase_timestamp` (Format: `YYYY-MM-DD HH:MM:SS`)
+* `order_estimated_delivery_date` (Format: `YYYY-MM-DD`)
+* `order_delivered_customer_date` (Format: `YYYY-MM-DD HH:MM:SS`)
+* `customer_state` (e.g., `SP`, `RJ`, `MG`)
+* `price` (Numerical item price)
+* `freight_value` (Numerical shipping cost)
+
+### ⚡ Automated Pipeline Execution (CLI Mode)
+If you want to run the full processing and model re-training pipeline locally via the terminal with a new batch of orders:
+1. Place your raw file in `data/raw/new_incoming_orders.csv`.
+2. Execute the orchestration script:
+   ```bash
+   python scripts/run_pipeline.py
+   
 📄 Documentation
 The full planning and strategy document is available in docs/project_plan.md. It outlines the project definition, data science approach, strategic roadmap, and expected outcomes.
 

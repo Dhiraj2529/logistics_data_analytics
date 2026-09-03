@@ -79,7 +79,33 @@ page = st.sidebar.radio(
     "Select Module",
     ["📊 Executive Overview", "📈 Demand Forecasting", "⏱️ Delivery Time Predictor", "📦 Inventory & Route Optimization"]
 )
-
+# ==========================================
+# INTERACTIVE USER GUIDE (SIDEBAR)
+# ==========================================
+with st.sidebar.expander("📖 User Guide & Instructions", expanded=False):
+    st.markdown("""
+    **Welcome to the Logistics Hub!** 
+    Follow these quick steps to explore the platform:
+    
+    1. **📊 Executive Overview:**
+       - View high-level metrics (OTD Rate, Lead Times, Freight costs).
+       - Analyze daily order volume trends and state-wise performance.
+       
+    2. **📈 Demand Forecasting:**
+       - Use the slider to select a forecast horizon (7 to 60 days).
+       - Click **Generate Forecast** to project future order demand with 80% confidence bands.
+       
+    3. **⏱️ Delivery Time Predictor:**
+       - Input order parameters (Destination State, Items, Price, Distance).
+       - Click **Predict Delivery Lead Time** to get real-time ML duration estimates.
+       
+    4. **📦 Inventory & Route Optimization:**
+       - Review category-level Safety Stock and Reorder Points (ROP).
+       - Inspect regional cluster maps for delivery route efficiency.
+       
+    5. **📂 Custom Data Testing:**
+       - Toggle to **Upload Custom CSV** in the sidebar data mode to test your own data files live!
+    """)
 st.sidebar.markdown("---")
 st.sidebar.subheader("📂 Data Source Configuration")
 data_mode = st.sidebar.radio("Choose Data Mode", ["Default Dataset", "Upload Custom CSV"])

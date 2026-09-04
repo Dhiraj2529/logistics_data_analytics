@@ -156,6 +156,56 @@ else:
     orders, items, daily_sales, inventory = load_default_data()
 
 st.sidebar.markdown("---")
+
+# ==========================================
+# SIDEBAR FILTERS (Interactive Analysis)
+# ==========================================
+st.sidebar.markdown("---")
+st.sidebar.subheader("🔍 Global Filters")
+
+# Check if orders data is available to extract states/dates
+if not orders.empty and 'customer_state' in orders.columns:
+    # 1. State Filter
+    all_states = sorted(orders['customer_state'].dropna().unique())
+    selected_states = st.sidebar.multiselect(
+        "Filter by Destination State(s)",
+        options=all_states,
+        default=all_states[:3], # Select first 3 by default to keep it fast
+        help="Select specific Brazilian states to filter the metrics, charts, and predictions."
+    )
+    
+    # Apply State Filter to DataFrame
+    if selected_states:
+        filtered_orders = orders[orders['customer_state'].isin(selected_states)]
+    else:
+        filtered_orders = orders.copy()
+else:
+    filtered_orders = orders.copy()
+
+# 2. Date Range Filter (if purchase timestamp exists)
+if not filtered_orders.empty and 'order_purchase_timestamp' in filtered_orders.columns:
+    min_date = filtered_orders['order_purchase_timestamp'].min().date()
+    max_date = filtered_orders['order_purchase_timestamp'].max().date()
+    
+    selected_date_range = st.sidebar.date_input(
+        "Filter by Date Range",
+        value=(min_date, max_date),
+        min_value=min_date,
+        max_value=max_date,
+        help="Select a start and end date range to narrow down order telemetry."
+    )
+    
+    # Apply Date Range Filter if both start and end dates are selected
+    if len(selected_date_range) == 2:
+        start_d, end_d = selected_date_range
+        filtered_orders = filtered_orders[
+            (filtered_orders['order_purchase_timestamp'].dt.date >= start_d) & 
+            (filtered_orders['order_purchase_timestamp'].dt.date <= end_d)
+        ]
+
+st.sidebar.success(f"📊 Active Records: {len(filtered_orders):,} orders loaded.")
+st.sidebar.markdown("---")
+
 # ==========================================
 # PAGE 1: EXECUTIVE OVERVIEW
 # ==========================================
@@ -163,32 +213,39 @@ if page == "📊 Executive Overview":
     st.title("Supply Chain & Logistics Performance Dashboard")
     st.markdown("Operational overview of fulfillment metrics, SLAs, and delivery timelines across Brazil.")
 
-    if orders.empty or items.empty:
-        st.error("Processed data files not found in `data/processed/`. Please verify your folder structure.")
+    if filtered_orders.empty or items.empty:
+        st.error("Processed data files not found or filtered dataset is empty. Please check your filters or data source.")
     else:
-        orders['on_time'] = orders['delay_days'] <= 0
-        otd_rate = orders['on_time'].mean() * 100
-        avg_delivery = orders['delivery_time_days'].mean()
-        avg_delay = orders['delay_days'].mean()
+        # Use filtered_orders for calculations so sidebar filters work instantly!
+        filtered_orders['on_time'] = filtered_orders['delay_days'] <= 0
+        otd_rate = filtered_orders['on_time'].mean() * 100
+        avg_delivery = filtered_orders['delivery_time_days'].mean()
+        avg_delay = filtered_orders['delay_days'].mean()
         
-        order_freight = items.groupby('order_id')['freight_value'].sum().reset_index()
-        avg_freight = order_freight['freight_value'].mean()
+        # Match items with filtered orders
+        filtered_items = items[items['order_id'].isin(filtered_orders['order_id'])]
+        order_freight = filtered_items.groupby('order_id')['freight_value'].sum().reset_index()
+        avg_freight = order_freight['freight_value'].mean() if not order_freight.empty else 0.0
 
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("On-Time Delivery Rate", f"{otd_rate:.1f}%", delta=f"{otd_rate - 90:.1f}% vs SLA")
-        col2.metric("Avg Delivery Lead Time", f"{avg_delivery:.1f} days")
-        col3.metric("Avg Delay Metric", f"{avg_delay:.1f} days")
-        col4.metric("Avg Freight per Order", f"R$ {avg_freight:.2f}")
+        col1.metric("On-Time Delivery Rate", f"{otd_rate:.1f}%", delta=f"{otd_rate - 90:.1f}% vs SLA", help="Percentage of orders delivered on or before promised SLA.")
+        col2.metric("Avg Delivery Lead Time", f"{avg_delivery:.1f} days", help="Average total duration from purchase to doorstep delivery.")
+        col3.metric("Avg Delay Metric", f"{avg_delay:.1f} days", help="Average variance between actual delivery date and estimated SLA.")
+        col4.metric("Avg Freight per Order", f"R$ {avg_freight:.2f}", help="Average shipping cost per processed order.")
 
         st.markdown("###")
         col_left, col_right = st.columns(2)
 
         with col_left:
             st.subheader("Daily Order Volume Trend")
-            if not daily_sales.empty:
+            # Update daily sales based on filtered orders
+            filtered_daily_sales = filtered_orders.groupby(filtered_orders['order_purchase_timestamp'].dt.date).size().reset_index(name='orders')
+            filtered_daily_sales.columns = ['date', 'orders']
+            
+            if not filtered_daily_sales.empty:
                 fig_ts = go.Figure()
                 fig_ts.add_trace(go.Scatter(
-                    x=daily_sales['date'], y=daily_sales['orders'], 
+                    x=filtered_daily_sales['date'], y=filtered_daily_sales['orders'], 
                     name="Orders", line=dict(color="#2b5c8f", width=2)
                 ))
                 fig_ts.update_layout(
@@ -202,7 +259,7 @@ if page == "📊 Executive Overview":
 
         with col_right:
             st.subheader("On-Time Delivery Rate by State")
-            state_perf = orders.groupby('customer_state').agg(
+            state_perf = filtered_orders.groupby('customer_state').agg(
                 total=('order_id', 'count'),
                 on_time=('on_time', 'sum')
             ).reset_index()
@@ -223,6 +280,270 @@ if page == "📊 Executive Overview":
             fig_state.update_yaxes(showgrid=True, gridcolor="#f1f3f5")
             st.plotly_chart(fig_state, use_container_width=True)
 
+        # 📦 Delivery Time Distribution Box Plot (Properly indented inside page 1)
+        st.markdown("###")
+        st.subheader("📦 Delivery Time Distribution by State")
+        fig_box = px.box(
+            filtered_orders,
+            x='customer_state', 
+            y='delivery_time_days',
+            title="Delivery Duration Spread & Outliers by Customer State",
+            labels={'delivery_time_days': 'Delivery Duration (Days)', 'customer_state': 'Destination State'},
+            color='customer_state'
+        )
+        fig_box.update_layout(
+            height=400, 
+            margin=dict(l=10, r=10, t=30, b=10), 
+            plot_bgcolor="#ffffff", 
+            paper_bgcolor="#ffffff",
+            showlegend=False
+        )
+        fig_box.update_xaxes(showgrid=False)
+        fig_box.update_yaxes(showgrid=True, gridcolor="#f1f3f5")
+        st.plotly_chart(fig_box, use_container_width=True)
+        # =========================================================================
+        # 🔗 CORRELATION HEATMAP 
+        # =========================================================================
+        st.markdown("###")
+        st.subheader("🔗 Correlation Heatmap")
+
+        # Aggregate item-level metrics up to order level
+        order_agg = filtered_items.groupby('order_id').agg(
+            total_price=('price', 'sum'),
+            total_freight=('freight_value', 'sum'),
+            avg_distance=('seller_to_customer_km', 'mean') if 'seller_to_customer_km' in filtered_items.columns else ('freight_value', 'count'), # fallback
+            num_items=('order_item_id', 'count') if 'order_item_id' in filtered_items.columns else ('price', 'count')
+        ).reset_index()
+
+        # Merge with filtered orders
+        corr_df = filtered_orders.merge(order_agg, on='order_id', how='left')
+        
+        # Select target numeric columns for correlation matrix
+        target_corr_cols = ['delivery_time_days', 'delay_days', 'total_price', 'total_freight']
+        if 'avg_distance' in corr_df.columns:
+            target_corr_cols.append('avg_distance')
+            
+        # Clean data for correlation calculation
+        corr_subset = corr_df[target_corr_cols].dropna()
+
+        if not corr_subset.empty:
+            fig_corr = px.imshow(
+                corr_subset.corr(), 
+                text_auto=".2f", 
+                aspect="auto",
+                title="Correlation Matrix of Logistics Variables",
+                color_continuous_scale="RdBu_r",
+                range_color=[-1, 1]
+            )
+            fig_corr.update_layout(
+                height=450, 
+                margin=dict(l=10, r=10, t=30, b=10),
+                plot_bgcolor="#ffffff", 
+                paper_bgcolor="#ffffff"
+            )
+            st.plotly_chart(fig_corr, use_container_width=True)
+        else:
+            st.info("ℹ️ Insufficient data overlap to compute the correlation matrix for these filters.")
+
+        # =========================================================================
+        # 📈  DISTANCE VS DELIVERY TIME SCATTER PLOT
+        # =========================================================================
+        st.markdown("###")
+        st.subheader("📈 Distance vs Delivery Time")
+        
+        if not corr_df.empty and 'avg_distance' in corr_df.columns and 'delivery_time_days' in corr_df.columns:
+            fig_scatter = px.scatter(
+                corr_df, 
+                x='avg_distance', 
+                y='delivery_time_days',
+                color='delay_days' if 'delay_days' in corr_df.columns else None, 
+                size='total_freight' if 'total_freight' in corr_df.columns else None,
+                hover_data=['order_id'] if 'order_id' in corr_df.columns else None,
+                title="Impact of Distance on Delivery Time and Cost",
+                labels={
+                    'avg_distance': 'Average Distance (km)', 
+                    'delivery_time_days': 'Delivery Duration (Days)',
+                    'delay_days': 'Delay (Days)',
+                    'total_freight': 'Freight Cost (R$)'
+                },
+                color_continuous_scale="Viridis"
+            )
+            fig_scatter.update_layout(
+                height=450, 
+                margin=dict(l=10, r=10, t=30, b=10),
+                plot_bgcolor="#ffffff", 
+                paper_bgcolor="#ffffff"
+            )
+            fig_scatter.update_xaxes(showgrid=True, gridcolor="#f1f3f5")
+            fig_scatter.update_yaxes(showgrid=True, gridcolor="#f1f3f5")
+            st.plotly_chart(fig_scatter, use_container_width=True)
+        else:
+            st.info("ℹ️ Insufficient data available to render the distance vs delivery time scatter plot.")
+
+        # =========================================================================
+        #  ON-TIME DELIVERY RATE BY STATE (BAR CHART)
+        # =========================================================================
+        st.markdown("###")
+        st.subheader("✅ On-Time Delivery Rate by State")
+
+        # Ensure 'on_time' column exists in filtered_orders
+        if 'on_time' not in filtered_orders.columns and 'delay_days' in filtered_orders.columns:
+            filtered_orders['on_time'] = filtered_orders['delay_days'] <= 0
+
+        if 'customer_state' in filtered_orders.columns and 'on_time' in filtered_orders.columns:
+            # Compute OTD per state on filtered orders
+            state_otd = filtered_orders.groupby('customer_state').agg(
+                total_orders=('order_id', 'count'),
+                on_time=('on_time', 'sum')
+            ).reset_index()
+            
+            state_otd['otd_rate'] = (state_otd['on_time'] / state_otd['total_orders']) * 100
+            state_otd = state_otd.sort_values('otd_rate', ascending=True) # Sorted ascending for clean bar layout
+
+            fig_otd = px.bar(
+                state_otd, 
+                x='customer_state', 
+                y='otd_rate',
+                title="On-Time Delivery Rate by State (%)",
+                labels={'otd_rate': 'OTD %', 'customer_state': 'Destination State'},
+                color='otd_rate',
+                color_continuous_scale='blues'
+            )
+            fig_otd.update_layout(
+                height=400, 
+                margin=dict(l=10, r=10, t=30, b=10),
+                plot_bgcolor="#ffffff", 
+                paper_bgcolor="#ffffff",
+                coloraxis_showscale=False
+            )
+            fig_otd.update_xaxes(showgrid=False)
+            fig_otd.update_yaxes(showgrid=True, gridcolor="#f1f3f5", range=[0, 100])
+            st.plotly_chart(fig_otd, use_container_width=True)
+        else:
+            st.info("ℹ️ Insufficient data to calculate OTD rate by state.")
+
+        # =========================================================================
+        # ⏳ STEP 9: AVERAGE DELAY OVER TIME
+        # =========================================================================
+        st.markdown("###")
+        st.subheader("⏳ Average Delay Over Time")
+        
+        if not filtered_orders.empty and 'order_purchase_timestamp' in filtered_orders.columns and 'delay_days' in filtered_orders.columns:
+            # Ensure datetime type and resample correctly
+            df_delay_temp = filtered_orders.copy()
+            df_delay_temp['order_purchase_timestamp'] = pd.to_datetime(df_delay_temp['order_purchase_timestamp'])
+            
+            daily_delay = df_delay_temp.set_index('order_purchase_timestamp').resample('D')['delay_days'].mean().reset_index()
+            
+            fig_delay = px.line(
+                daily_delay, 
+                x='order_purchase_timestamp', 
+                y='delay_days',
+                title="Daily Average Delay (days)",
+                labels={'order_purchase_timestamp': 'Purchase Date', 'delay_days': 'Average Delay (Days)'}
+            )
+            fig_delay.update_layout(
+                height=400, 
+                margin=dict(l=10, r=10, t=30, b=10),
+                plot_bgcolor="#ffffff", 
+                paper_bgcolor="#ffffff"
+            )
+            fig_delay.update_xaxes(showgrid=True, gridcolor="#f1f3f5")
+            fig_delay.update_yaxes(showgrid=True, gridcolor="#f1f3f5")
+            st.plotly_chart(fig_delay, use_container_width=True)
+        else:
+            st.info("ℹ️ Insufficient data available to render the delay over time chart.")
+
+        # =========================================================================
+        # 🕒 STEP 10: ORDER VOLUME BY DAY AND HOUR (HEATMAP)
+        # =========================================================================
+        st.markdown("###")
+        st.subheader("🕒 Order Volume by Day and Hour")
+
+        if not filtered_orders.empty and 'order_purchase_timestamp' in filtered_orders.columns:
+            # Create a copy to avoid SettingWithCopyWarning
+            df_heat_temp = filtered_orders.copy()
+            df_heat_temp['hour'] = pd.to_datetime(df_heat_temp['order_purchase_timestamp']).dt.hour
+            df_heat_temp['day_of_week'] = pd.to_datetime(df_heat_temp['order_purchase_timestamp']).dt.day_name()
+            
+            # Create pivot table
+            heat_data = df_heat_temp.pivot_table(index='day_of_week', columns='hour', values='order_id', aggfunc='count').fillna(0)
+            
+            # Order days correctly
+            days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            heat_data = heat_data.reindex(days_order).dropna(how='all')
+            
+            if not heat_data.empty:
+                fig_heat = px.imshow(
+                    heat_data,
+                    labels=dict(x="Hour of Day", y="Day of Week", color="Order Count"),
+                    x=heat_data.columns,
+                    y=heat_data.index,
+                    title="Order Density Heatmap by Day of Week and Hour",
+                    color_continuous_scale="Blues"
+                )
+                fig_heat.update_layout(
+                    height=400,
+                    margin=dict(l=10, r=10, t=30, b=10),
+                    plot_bgcolor="#ffffff",
+                    paper_bgcolor="#ffffff"
+                )
+                st.plotly_chart(fig_heat, use_container_width=True)
+            else:
+                st.info("ℹ️ Insufficient time data to render the demand heatmap.")
+        else:
+            st.info("ℹ️ Order purchase timestamps are missing from the dataset.")
+
+        # =========================================================================
+        # ⚠️ STEP 11: ANOMALY DETECTION ALERTS
+        # =========================================================================
+        st.markdown("###")
+        st.subheader("⚠️ Anomaly Alerts")
+
+        # Check if an anomalies file exists, or compute statistical anomalies on the fly from filtered orders
+        anomaly_file_path = 'data/processed/anomalies_detected.csv'
+        
+        if os.path.exists(anomaly_file_path):
+            anomalies_df = pd.read_csv(anomaly_file_path)
+            st.warning(f"🚨 Detected {len(anomalies_df):,} logistical anomalies flagged by ML models.")
+            st.dataframe(anomalies_df[['order_id', 'customer_state', 'delivery_time_days', 'delay_days']].head(10), use_container_width=True)
+        else:
+            # Fallback: Dynamically flag extreme outlier deliveries (> 3 standard deviations from mean)
+            if not filtered_orders.empty and 'delivery_time_days' in filtered_orders.columns:
+                mean_dur = filtered_orders['delivery_time_days'].mean()
+                std_dur = filtered_orders['delivery_time_days'].std()
+                threshold = mean_dur + (3 * std_dur)
+                
+                anomalies_df = filtered_orders[filtered_orders['delivery_time_days'] > threshold]
+                
+                if not anomalies_df.empty:
+                    st.warning(f"🚨 Flagged {len(anomalies_df):,} high-latency delivery outliers exceeding normal operational thresholds (> {threshold:.1f} days).")
+                    display_cols = [col for col in ['order_id', 'customer_state', 'delivery_time_days', 'delay_days'] if col in anomalies_df.columns]
+                    st.dataframe(anomalies_df[display_cols].head(10), use_container_width=True)
+                else:
+                    st.success("✅ No extreme logistical delivery anomalies detected in the current filter selection.")
+            else:
+                st.info("ℹ️ Anomaly detection data not found. Run your Isolation Forest or outlier detection script to generate alerts.")
+
+            # =========================================================================
+        # 📥 STEP 12: DOWNLOAD FILTERED DATA
+        # =========================================================================
+        st.markdown("###")
+        st.subheader("📥 Download Filtered Data")
+
+        if not filtered_orders.empty:
+            # Convert filtered dataframe to CSV bytes
+            csv_data = filtered_orders.to_csv(index=False).encode('utf-8')
+            
+            st.download_button(
+                label="📥 Download Filtered Orders CSV",
+                data=csv_data,
+                file_name='filtered_orders_export.csv',
+                mime='text/csv',
+                help="Click to download the current filtered dataset based on your active sidebar selections."
+            )
+        else:
+            st.info("ℹ️ No data available to download for the current filter selection.")
 # ==========================================
 # PAGE 2: DEMAND FORECASTING (PROPHET)
 # ==========================================
@@ -353,4 +674,4 @@ elif page == "📦 Inventory & Route Optimization":
     if os.path.exists('reports/figures/sp_delivery_clusters.png'):
         st.image('reports/figures/sp_delivery_clusters.png', caption="São Paulo Delivery Zone Optimization (K-Means Clustering)", use_container_width=True)
     else:
-        st.warning("⚠️ Cluster figure not found. Please run `python scripts/run_optimization.py` to generate the image.")
+        st.warning("⚠️ Cluster figure not found. Please run `python scripts/run_optimization.py` to generate the image.")   
